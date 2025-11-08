@@ -1,0 +1,17 @@
+[project]
+name = "apple-notes-to-google-keep"
+version = "0.1.0"
+description = "Migrate Apple Notes to Google Keep"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "gkeepapi>=0.16.0",
+    "keyring>=24.0.0",
+]
+
+[project.scripts]
+notes-migrate = "notes_migrator.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
