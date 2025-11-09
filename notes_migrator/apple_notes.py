@@ -86,11 +86,25 @@ class AppleNotesExtractor:
 
                 # Remove title from beginning of content if present
                 # Apple Notes includes the title as the first line
+                # We need to adjust attachment positions after removing the title
+                title_offset = 0
                 if content and title:
                     # Check if content starts with the title (possibly followed by newline)
                     if content.startswith(title):
+                        # Calculate how many characters we're removing
+                        title_with_newlines = title
+                        remaining = content[len(title):]
+                        # Count newlines being stripped
+                        stripped = remaining.lstrip('\n')
+                        title_offset = len(title) + (len(remaining) - len(stripped))
+
                         # Remove title and any following newlines
-                        content = content[len(title):].lstrip('\n')
+                        content = stripped
+
+                        # Adjust attachment positions by subtracting the title offset
+                        for attachment in attachments:
+                            if 'position' in attachment:
+                                attachment['position'] -= title_offset
 
                 # Convert Apple's time format (seconds since 2001-01-01)
                 created_date = self._convert_apple_timestamp(created)

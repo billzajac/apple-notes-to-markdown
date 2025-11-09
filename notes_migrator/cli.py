@@ -213,6 +213,10 @@ Examples:
                 args.output_dir.name
             )
             print(f"  ✅ Created: {zip_file}")
+
+            # Remove the output directory after successful ZIP creation
+            shutil.rmtree(args.output_dir)
+            print(f"  🗑️  Removed: {args.output_dir}")
         except Exception as e:
             print(f"  ⚠️  Failed to create ZIP: {e}")
             print(f"  You can manually zip the folder: zip -r {args.output_dir.name}.zip {args.output_dir.name}")
@@ -226,8 +230,6 @@ Examples:
             print(f"3. Select 'Markdown' as the source")
             print(f"4. Select the ZIP file: {Path(zip_file).name}")
             print(f"5. Review and confirm the import")
-            print(f"\n💡 Alternative: Import the unzipped folder directly")
-            print(f"   (select folder: {args.output_dir.absolute()})")
         else:
             print(f"1. Zip the export folder first")
             print(f"2. Open Notesnook app")
