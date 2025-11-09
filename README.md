@@ -99,15 +99,29 @@ notes-export --dry-run
 
 ### Importing to Notesnook
 
-After exporting your notes:
+After exporting your notes, you have two options:
 
+**Option 1: Import as ZIP (Recommended)**
+```bash
+# Zip the export folder
+cd /path/to/parent/directory
+zip -r my-notes.zip my-notes
+
+# Then in Notesnook:
+# Settings → Notesnook Importer → Select 'Markdown' → Choose my-notes.zip
+```
+
+**Option 2: Import Folder Directly**
 1. Open Notesnook app
-2. Go to Settings > Notesnook Importer
+2. Go to Settings → Notesnook Importer
 3. Select "Markdown" as the source
-4. Select your export folder (the one containing both `.md` files and the `attachments/` directory)
+4. Select your export folder (e.g., `my-notes/`)
 5. Review and confirm the import
 
-**Note**: File attachments (images, PDFs, etc.) are automatically extracted and saved to the `attachments/` subdirectory during export. No manual copying needed!
+**✨ What gets imported:**
+- All notes with preserved titles, dates, and tags
+- File attachments (images, PDFs) automatically included
+- Markdown formatting with images embedded as `![](attachments/image.png)`
 
 ### Advanced Options
 

@@ -185,24 +185,34 @@ Examples:
         exporter = NotesnookExporter()
         successful = exporter.export_notes(notes, args.output_dir, args.attachments_dir)
 
-        print(f"\n{'=' * 50}")
-        print(f"Export complete!")
-        print(f"  ✓ Exported: {successful} notes")
-        print(f"  📁 Location: {args.output_dir}")
-        print(f"  📎 Attachments reference: {args.attachments_dir}/")
-        print(f"{'=' * 50}")
+        # Count attachments
+        attachment_count = 0
+        attachments_path = args.output_dir / args.attachments_dir
+        if attachments_path.exists():
+            attachment_count = len([f for f in attachments_path.iterdir() if f.is_file()])
+
+        print(f"\n{'=' * 60}")
+        print(f"✅ Export complete!")
+        print(f"  📝 Exported: {successful} notes")
+        if attachment_count > 0:
+            print(f"  📎 Extracted: {attachment_count} attachments")
+        print(f"  📁 Location: {args.output_dir.absolute()}")
+        print(f"{'=' * 60}")
 
         print("\n📥 To import into Notesnook:")
-        print(
-            f"1. Place your attachment files in: {args.output_dir}/{args.attachments_dir}/"
-        )
-        print("2. Open Notesnook app")
-        print("3. Go to Settings > Notesnook Importer")
-        print("4. Select 'Markdown' as the source")
-        print(f"5. Select the folder: {args.output_dir}")
-        print("6. Review and confirm the import")
-        print("\nNote: Notesnook supports markdown with YAML frontmatter")
-        print("including title, created/updated dates, and tags.")
+        print(f"1. Zip the export folder:")
+        print(f"   cd {args.output_dir.parent}")
+        print(f"   zip -r {args.output_dir.name}.zip {args.output_dir.name}")
+        print(f"\n2. Open Notesnook app")
+        print(f"3. Go to Settings → Notesnook Importer")
+        print(f"4. Select 'Markdown' as the source")
+        print(f"5. Select the ZIP file: {args.output_dir.name}.zip")
+        print(f"6. Review and confirm the import")
+        print(f"\n💡 Alternative: You can also import the unzipped folder directly")
+        print(f"   (select the folder: {args.output_dir.absolute()})")
+        print(f"\nℹ️  Notes are exported with YAML frontmatter including:")
+        print(f"   • Title, created/updated dates, and tags")
+        print(f"   • Images and PDFs embedded with markdown syntax")
 
         return 0
 
