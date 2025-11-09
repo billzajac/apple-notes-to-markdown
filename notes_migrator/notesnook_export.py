@@ -101,18 +101,24 @@ class NotesnookExporter:
         Returns:
             Text with markdown image/link syntax.
         """
+        from urllib.parse import quote
+
         result = []
         for i, char in enumerate(text):
             if char == '\ufffc' and i in position_to_file:
                 file_path = position_to_file[i]
+                # URL-encode the path to handle spaces and special characters
+                # quote() with safe='/' keeps directory separators but encodes spaces, etc.
+                encoded_path = quote(file_path, safe='/')
+
                 # Determine if it's an image based on extension
                 ext = Path(file_path).suffix.lower()
                 if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif']:
-                    result.append(f"![attachment]({file_path})")
+                    result.append(f"![attachment]({encoded_path})")
                 else:
                     # For other files (PDFs, videos), use link syntax
                     filename = Path(file_path).name
-                    result.append(f"[{filename}]({file_path})")
+                    result.append(f"[{filename}]({encoded_path})")
             elif char != '\ufffc':
                 result.append(char)
 
