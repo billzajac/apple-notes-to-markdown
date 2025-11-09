@@ -6,7 +6,7 @@ import gzip
 import io
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from protobuf_inspector.types import StandardParser
 
@@ -20,12 +20,14 @@ class AppleNote:
     created_date: Optional[datetime]
     modified_date: Optional[datetime]
     folder: Optional[str]
+    attachments: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class AppleNotesExtractor:
     """Extracts notes from the Apple Notes SQLite database."""
 
     DEFAULT_DB_PATH = Path.home() / "Library/Group Containers/group.com.apple.notes/NoteStore.sqlite"
+    DEFAULT_MEDIA_BASE = Path.home() / "Library/Group Containers/group.com.apple.notes/Accounts"
 
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize extractor with database path.
@@ -34,6 +36,7 @@ class AppleNotesExtractor:
             db_path: Path to Notes database. Uses default location if None.
         """
         self.db_path = db_path or self.DEFAULT_DB_PATH
+        self.media_base = self.DEFAULT_MEDIA_BASE
 
         if not self.db_path.exists():
             raise FileNotFoundError(
@@ -81,6 +84,24 @@ class AppleNotesExtractor:
                 # Extract text content from binary data
                 content = self._extract_content(content_data, snippet)
 
+                # Extract attachments
+                attachments = []
+                if content_data:
+                    try:
+                        # Check if it's gzipped
+                        is_gzipped = len(content_data) >= 2 and content_data[0] == 0x1f and content_data[1] == 0x8b
+                        decompressed = gzip.decompress(content_data) if is_gzipped else content_data
+
+                        # Parse protobuf to get attribute_run
+                        from . import notestore_pb2
+                        note_store = notestore_pb2.NoteStoreProto()
+                        note_store.ParseFromString(decompressed)
+
+                        if note_store.HasField('document') and note_store.document.HasField('note'):
+                            attachments = self._extract_attachments(pk, note_store.document.note.attribute_run)
+                    except:
+                        pass  # If attachment extraction fails, continue without attachments
+
                 # Convert Apple's time format (seconds since 2001-01-01)
                 created_date = self._convert_apple_timestamp(created)
                 modified_date = self._convert_apple_timestamp(modified)
@@ -90,7 +111,8 @@ class AppleNotesExtractor:
                     content=content,
                     created_date=created_date,
                     modified_date=modified_date,
-                    folder=folder
+                    folder=folder,
+                    attachments=attachments
                 )
                 notes.append(note)
 
@@ -234,6 +256,7 @@ class AppleNotesExtractor:
 
         Returns:
             Text representation of the attachment, or None.
+            Returns None for file attachments (images, PDFs, etc.) to preserve \ufffc markers.
         """
         try:
             if not hasattr(self, 'conn') or self.conn is None:
@@ -254,13 +277,153 @@ class AppleNotesExtractor:
                 # For hashtags and mentions, return the alt text
                 if 'hashtag' in type_uti or 'mention' in type_uti:
                     return alt_text or ''
-                # For other inline attachments, return alt text or a placeholder
-                return alt_text or '[attachment]'
+                # For file attachments (images, PDFs, etc.), return None
+                # to preserve the \ufffc marker for later processing
+                # The exporter will replace these with markdown image/link syntax
+                return None
 
             return None
 
         except Exception:
             return None
+
+    def _extract_attachments(self, note_pk: int, attribute_runs) -> List[Dict[str, Any]]:
+        """Extract file attachments for a note.
+
+        Args:
+            note_pk: Primary key of the note in ZICCLOUDSYNCINGOBJECT.
+            attribute_runs: List of AttributeRun from protobuf.
+
+        Returns:
+            List of attachment dictionaries with file data.
+        """
+        attachments = []
+        pos = 0
+
+        try:
+            for attr_run in attribute_runs:
+                if attr_run.HasField('attachment_info'):
+                    attachment_id = attr_run.attachment_info.attachment_identifier
+                    type_uti = attr_run.attachment_info.type_uti
+
+                    # Skip inline attachments (hashtags, mentions) - already handled
+                    if 'hashtag' in type_uti or 'mention' in type_uti:
+                        pos += attr_run.length
+                        continue
+
+                    # Get attachment metadata from database
+                    cursor = self.conn.cursor()
+
+                    # Query for file attachment metadata and media UUID
+                    # The ZMEDIA field points to another record in the same table
+                    # that contains the actual media file UUID
+                    cursor.execute("""
+                        SELECT
+                            att.ZIDENTIFIER as att_uuid,
+                            att.ZTYPEUTI as att_uti,
+                            att.ZFILENAME,
+                            att.ZFILESIZE,
+                            media.ZIDENTIFIER as media_uuid
+                        FROM ZICCLOUDSYNCINGOBJECT att
+                        LEFT JOIN ZICCLOUDSYNCINGOBJECT media ON att.ZMEDIA = media.Z_PK
+                        WHERE att.ZIDENTIFIER = ?
+                    """, (attachment_id,))
+
+                    row = cursor.fetchone()
+                    if row:
+                        att_uuid, uti, filename, filesize, media_uuid = row
+
+                        # Read media file from filesystem using the media UUID
+                        media_result = self._read_media_file(media_uuid) if media_uuid else None
+
+                        if media_result:
+                            media_data, discovered_filename = media_result
+
+                            # Determine filename (prefer database filename, then discovered, then generated)
+                            final_filename = filename or discovered_filename
+                            if not final_filename:
+                                # Generate filename from UTI if no filename available
+                                ext = self._get_extension_from_uti(uti or type_uti)
+                                final_filename = f"{att_uuid[:8]}{ext}"
+
+                            attachments.append({
+                                'uuid': att_uuid,
+                                'type_uti': uti or type_uti,
+                                'filename': final_filename,
+                                'data': media_data,
+                                'position': pos
+                            })
+
+                pos += attr_run.length
+
+        except Exception as e:
+            # If attachment extraction fails, continue without attachments
+            pass
+
+        return attachments
+
+    def _read_media_file(self, uuid: str) -> Optional[tuple[bytes, str]]:
+        """Read media file from filesystem.
+
+        The media files are stored in a nested structure:
+        Accounts/<account_uuid>/Media/<media_uuid>/<version_uuid>/<filename>
+
+        Args:
+            uuid: UUID of the media record.
+
+        Returns:
+            Tuple of (file_data, filename) or None if not found.
+        """
+        try:
+            # Find the account directory (should be only one, but check all)
+            if not self.media_base.exists():
+                return None
+
+            for account_dir in self.media_base.iterdir():
+                if account_dir.is_dir():
+                    media_dir = account_dir / "Media" / uuid
+                    if media_dir.exists() and media_dir.is_dir():
+                        # Media directory contains version subdirectories
+                        # Get the first (and usually only) version directory
+                        version_dirs = [d for d in media_dir.iterdir() if d.is_dir()]
+                        if version_dirs:
+                            # Get the first file in the version directory
+                            version_dir = version_dirs[0]
+                            files = [f for f in version_dir.iterdir() if f.is_file()]
+                            if files:
+                                file_path = files[0]
+                                return (file_path.read_bytes(), file_path.name)
+
+            return None
+        except Exception:
+            return None
+
+    def _get_extension_from_uti(self, uti: str) -> str:
+        """Get file extension from UTI type.
+
+        Args:
+            uti: Uniform Type Identifier.
+
+        Returns:
+            File extension including dot.
+        """
+        uti_map = {
+            'public.jpeg': '.jpg',
+            'public.png': '.png',
+            'public.heic': '.heic',
+            'public.heif': '.heif',
+            'com.apple.image': '.jpg',
+            'com.adobe.pdf': '.pdf',
+            'public.movie': '.mov',
+            'com.apple.quicktime-movie': '.mov',
+            'public.mpeg-4': '.mp4',
+        }
+
+        for key, ext in uti_map.items():
+            if key in uti.lower():
+                return ext
+
+        return '.bin'
 
     def _extract_text_strings(self, data: bytes) -> str:
         """Extract printable text strings from binary protobuf data.

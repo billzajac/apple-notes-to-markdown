@@ -1,7 +1,7 @@
 """Export notes to Notesnook markdown format."""
 
 from pathlib import Path
-from typing import List
+from typing import List, Dict
 from datetime import datetime
 from .apple_notes import AppleNote
 
@@ -52,6 +52,72 @@ class NotesnookExporter:
 
         return successful
 
+    def _save_attachments(self, note: AppleNote, output_dir: Path, attachments_dir: str) -> Dict[int, str]:
+        """Save note attachments to disk.
+
+        Args:
+            note: AppleNote with attachments.
+            output_dir: Base output directory.
+            attachments_dir: Attachments subdirectory name.
+
+        Returns:
+            Dict mapping position to relative filename.
+        """
+        attachments_path = output_dir / attachments_dir
+        attachments_path.mkdir(exist_ok=True)
+
+        position_to_file = {}
+
+        for i, attachment in enumerate(note.attachments):
+            # Generate unique filename
+            base_name = Path(attachment['filename']).stem
+            extension = Path(attachment['filename']).suffix
+
+            # Ensure uniqueness
+            counter = 0
+            filename = attachment['filename']
+            while (attachments_path / filename).exists():
+                counter += 1
+                filename = f"{base_name}_{counter}{extension}"
+
+            # Write file
+            file_path = attachments_path / filename
+            file_path.write_bytes(attachment['data'])
+
+            # Map position to relative path
+            position_to_file[attachment['position']] = f"{attachments_dir}/{filename}"
+
+            print(f"  💾 Saved attachment: {filename}")
+
+        return position_to_file
+
+    def _replace_attachment_markers(self, text: str, position_to_file: Dict[int, str]) -> str:
+        """Replace \ufffc markers with markdown references.
+
+        Args:
+            text: Note text with markers.
+            position_to_file: Mapping of character position to file path.
+
+        Returns:
+            Text with markdown image/link syntax.
+        """
+        result = []
+        for i, char in enumerate(text):
+            if char == '\ufffc' and i in position_to_file:
+                file_path = position_to_file[i]
+                # Determine if it's an image based on extension
+                ext = Path(file_path).suffix.lower()
+                if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif']:
+                    result.append(f"![attachment]({file_path})")
+                else:
+                    # For other files (PDFs, videos), use link syntax
+                    filename = Path(file_path).name
+                    result.append(f"[{filename}]({file_path})")
+            elif char != '\ufffc':
+                result.append(char)
+
+        return ''.join(result)
+
     def _write_markdown(self, note: AppleNote, path: Path, attachments_dir: str) -> None:
         """Write note as markdown file with YAML frontmatter.
 
@@ -83,8 +149,16 @@ class NotesnookExporter:
         # Build content
         content = note.content or ""
 
-        # Process content to handle any attachment references
-        # Apple Notes might have references that need to be converted
+        # Save attachments and get position mapping
+        position_to_file = {}
+        if note.attachments:
+            position_to_file = self._save_attachments(note, path.parent, attachments_dir)
+
+        # Replace \ufffc markers with markdown image/link syntax
+        if position_to_file:
+            content = self._replace_attachment_markers(content, position_to_file)
+
+        # Process content to handle any remaining attachment references
         content = self._process_content_for_attachments(content, attachments_dir)
 
         # Clean up problematic characters
@@ -157,9 +231,10 @@ class NotesnookExporter:
         Returns:
             Cleaned content.
         """
-        # Remove Apple Notes object replacement characters and other control characters
-        # The '\ufffc' character is used as an object replacement character in Apple Notes
-        content = content.replace('\ufffc', '[attachment]')  # Mark where attachments were
+        # Remove remaining Apple Notes object replacement characters
+        # Note: \ufffc markers should already be replaced by _replace_attachment_markers
+        # Only replace remaining ones that weren't matched to attachments
+        content = content.replace('\ufffc', '')  # Remove any remaining markers
 
         # Remove other common problematic characters from Apple Notes
         # Replace fancy quotes with regular quotes

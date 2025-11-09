@@ -15,6 +15,8 @@ This tool is to help me export my Apple Notes to Notesnook, which seems like a n
 - 🏷️ Converts Apple Notes folders to tags
 - 📅 Preserves creation and modification dates (ISO 8601)
 - 🔗 Resolves inline attachments (hashtags, mentions)
+- 📎 **Extracts file attachments** (images, PDFs, videos) from filesystem
+- 🖼️ Auto-generates markdown image/link syntax for attachments
 - 🔍 Dry-run mode to preview before exporting
 - ✨ Simple CLI interface
 
@@ -44,6 +46,34 @@ source venv/bin/activate
 pip install -e .
 ```
 
+4. **Grant Full Disk Access to your Terminal** (Required):
+
+   Since this tool needs to read the Apple Notes database, you must grant Full Disk Access to your terminal application.
+
+   **Option 1: Using System Settings (Recommended)**
+   1. Open **System Settings** (or **System Preferences** on older macOS)
+   2. Go to **Privacy & Security** → **Full Disk Access**
+   3. Click the **+** button to add an application
+   4. Navigate to `/Applications/Utilities/` and select your terminal app:
+      - **Terminal.app** (built-in Terminal)
+      - **iTerm.app** (if using iTerm2)
+      - **WezTerm** (if using WezTerm)
+      - **Alacritty** (if using Alacritty)
+      - Or your preferred terminal application
+   5. Toggle the switch to **ON** for your terminal
+   6. **Quit and restart your terminal application** for changes to take effect
+
+   **Option 2: Using the CLI Helper**
+   ```bash
+   # The exporter will detect permission issues and guide you
+   notes-export --check-permissions
+   ```
+
+   **Important Notes:**
+   - You must restart your terminal after granting permissions
+   - The tool accesses the database in **read-only mode** and doesn't modify your notes
+   - This is a macOS security requirement for accessing user data
+
 The protobuf schema has already been compiled. If you need to recompile:
 ```bash
 protoc --python_out=notes_migrator/ --proto_path=notes_migrator/ notestore.proto
@@ -67,18 +97,24 @@ notes-export --output-dir ./my-notes
 notes-export --dry-run
 ```
 
-### After Export
+### Importing to Notesnook
 
-1. Place your attachment files in the `attachments/` subdirectory within the export folder
-2. Open Notesnook app
-3. Go to Settings > Notesnook Importer
-4. Select "Markdown" as the source
-5. Select your export folder
-6. Review and confirm the import
+After exporting your notes:
+
+1. Open Notesnook app
+2. Go to Settings > Notesnook Importer
+3. Select "Markdown" as the source
+4. Select your export folder (the one containing both `.md` files and the `attachments/` directory)
+5. Review and confirm the import
+
+**Note**: File attachments (images, PDFs, etc.) are automatically extracted and saved to the `attachments/` subdirectory during export. No manual copying needed!
 
 ### Advanced Options
 
 ```bash
+# Check permissions before exporting
+notes-export --check-permissions
+
 # Use custom Apple Notes database path
 notes-export --db-path /path/to/NoteStore.sqlite
 
@@ -108,14 +144,24 @@ notes-export --help
    - Resolves inline attachments (hashtags, mentions) from database
    - Extracts clean text without junk/metadata
 
-3. **Transform**: Converts to Notesnook markdown format:
+3. **Extract Attachments**: Reads file attachments from filesystem:
+   ```
+   ~/Library/Group Containers/group.com.apple.notes/Accounts/<UUID>/Media/
+   ```
+   - Identifies attachments from protobuf `attribute_run` data
+   - Reads media files from nested directory structure
+   - Preserves original filenames where available
+
+4. **Transform**: Converts to Notesnook markdown format:
    - Title → YAML frontmatter `title` field
    - Content → Markdown body (with inline attachments resolved)
    - Folder → YAML frontmatter `tags` field
    - Created date → YAML frontmatter `created` field (ISO 8601)
    - Modified date → YAML frontmatter `updated` field (ISO 8601)
+   - Attachments → Saved to `attachments/` directory
+   - `\ufffc` markers → Replaced with `![image](attachments/file.png)` or `[file](attachments/doc.pdf)`
 
-4. **Export**: Writes markdown files compatible with Notesnook importer
+5. **Export**: Writes markdown files compatible with Notesnook importer
 
 ## Notesnook Markdown Format
 
@@ -138,10 +184,10 @@ Images and attachments: ![description](attachments/image.jpg)
 
 ## Limitations
 
-- **File attachments**: Images, PDFs, and other file attachments need to be manually placed in the `attachments/` directory
 - **Complex formatting**: Tables, drawings, and sketches are not exported (limitations of markdown)
 - **macOS only**: Requires access to local Apple Notes database
-- **Inline attachments**: Hashtags and mentions are resolved; other inline objects show as `[attachment]`
+- **Requires Full Disk Access**: Your terminal needs Full Disk Access permission to read Apple Notes data
+- **Local notes only**: iCloud-only notes must be synced locally first
 
 ## Troubleshooting
 
@@ -150,13 +196,39 @@ Images and attachments: ![description](attachments/image.jpg)
 - Check that Apple Notes app has been opened at least once
 - Verify Notes are stored locally (not just in iCloud)
 
-### "Permission denied" on database
+### "Permission denied" errors
+This is the most common issue. The tool needs Full Disk Access to read the Apple Notes database.
+
+**Solution:**
+1. Grant Full Disk Access to your terminal (see Installation step 4 above)
+2. **Restart your terminal completely** (quit and reopen, not just close the window)
+3. Run `notes-export --check-permissions` to verify access
+4. If still having issues, try:
+   - Removing and re-adding your terminal in Full Disk Access settings
+   - Checking that you selected the correct terminal application
+   - Running the command from the terminal you granted access to (not a different terminal app)
+
+**Quick permission check:**
+```bash
+# This will test if you have the necessary permissions
+notes-export --check-permissions
+```
+
+### Database locked or in use
 - Close Apple Notes app before running the export
 - The tool opens the database in read-only mode, but macOS may still lock it
+- Wait a few seconds after closing Notes and try again
+
+### Attachments not exported
+- File attachments (images, PDFs) are automatically extracted and saved to `attachments/`
+- Make sure you have read permissions for:
+  - `~/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite`
+  - `~/Library/Group Containers/group.com.apple.notes/Accounts/*/Media/`
+- Grant Full Disk Access to your terminal if attachments are missing
 
 ### Notes appear incomplete
 - This should not happen with the proper protobuf parser
-- If you see `[attachment]` markers, those are embedded objects not yet supported
+- If you see remaining `[attachment]` markers, those are unsupported embedded objects (tables, drawings)
 - Check the original note in Apple Notes to verify
 - Report issues with the protobuf schema
 
