@@ -199,20 +199,46 @@ Examples:
         print(f"  📁 Location: {args.output_dir.absolute()}")
         print(f"{'=' * 60}")
 
-        print("\n📥 To import into Notesnook:")
-        print(f"1. Zip the export folder:")
-        print(f"   cd {args.output_dir.parent}")
-        print(f"   zip -r {args.output_dir.name}.zip {args.output_dir.name}")
-        print(f"\n2. Open Notesnook app")
-        print(f"3. Go to Settings → Notesnook Importer")
-        print(f"4. Select 'Markdown' as the source")
-        print(f"5. Select the ZIP file: {args.output_dir.name}.zip")
-        print(f"6. Review and confirm the import")
-        print(f"\n💡 Alternative: You can also import the unzipped folder directly")
-        print(f"   (select the folder: {args.output_dir.absolute()})")
-        print(f"\nℹ️  Notes are exported with YAML frontmatter including:")
+        # Create ZIP file automatically
+        print(f"\n📦 Creating ZIP file for Notesnook import...")
+        import shutil
+        zip_path = args.output_dir.parent / f"{args.output_dir.name}"
+
+        try:
+            # Create the zip file (without .zip extension, shutil.make_archive adds it)
+            zip_file = shutil.make_archive(
+                str(zip_path),
+                'zip',
+                args.output_dir.parent,
+                args.output_dir.name
+            )
+            print(f"  ✅ Created: {zip_file}")
+        except Exception as e:
+            print(f"  ⚠️  Failed to create ZIP: {e}")
+            print(f"  You can manually zip the folder: zip -r {args.output_dir.name}.zip {args.output_dir.name}")
+            zip_file = None
+
+        print(f"\n{'=' * 60}")
+        print(f"📥 To import into Notesnook:")
+        if zip_file:
+            print(f"1. Open Notesnook app")
+            print(f"2. Go to Settings → Notesnook Importer")
+            print(f"3. Select 'Markdown' as the source")
+            print(f"4. Select the ZIP file: {Path(zip_file).name}")
+            print(f"5. Review and confirm the import")
+            print(f"\n💡 Alternative: Import the unzipped folder directly")
+            print(f"   (select folder: {args.output_dir.absolute()})")
+        else:
+            print(f"1. Zip the export folder first")
+            print(f"2. Open Notesnook app")
+            print(f"3. Go to Settings → Notesnook Importer")
+            print(f"4. Select 'Markdown' as the source")
+            print(f"5. Select the ZIP file or folder")
+
+        print(f"\nℹ️  Exported with YAML frontmatter including:")
         print(f"   • Title, created/updated dates, and tags")
         print(f"   • Images and PDFs embedded with markdown syntax")
+        print(f"{'=' * 60}")
 
         return 0
 

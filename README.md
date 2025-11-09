@@ -7,6 +7,10 @@ As of 11/2025, when I tried selecting all notes from Apple Notes to export to ma
 Motivation: I would like a cross-platform solution for my notes. At the time of writing this, getting data into Google Keep has proven to be awkward, and getting data out of Apple Notes has also proven to be awkward.
 This tool is to help me export my Apple Notes to Notesnook, which seems like a nice cross-platform notes alternative.
 
+## Notes about Coding this
+
+This was entirely vibe coded with Claude Code. There are no tests, but it now works for my fairly diverse set of 900+ notes.
+
 ## Features
 
 - 📱 Extracts notes directly from Apple Notes SQLite database
@@ -99,19 +103,17 @@ notes-export --dry-run
 
 ### Importing to Notesnook
 
-After exporting your notes, you have two options:
+After exporting your notes, a ZIP file is **automatically created** for you. Simply import it to Notesnook:
 
-**Option 1: Import as ZIP (Recommended)**
-```bash
-# Zip the export folder
-cd /path/to/parent/directory
-zip -r my-notes.zip my-notes
+**Import the Auto-Generated ZIP (Recommended)**
+1. Open Notesnook app
+2. Go to Settings → Notesnook Importer
+3. Select "Markdown" as the source
+4. Choose the auto-generated ZIP file (e.g., `my-notes.zip`)
+5. Review and confirm the import
 
-# Then in Notesnook:
-# Settings → Notesnook Importer → Select 'Markdown' → Choose my-notes.zip
-```
-
-**Option 2: Import Folder Directly**
+**Alternative: Import Folder Directly**
+If you prefer, you can import the unzipped folder:
 1. Open Notesnook app
 2. Go to Settings → Notesnook Importer
 3. Select "Markdown" as the source
