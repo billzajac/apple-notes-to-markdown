@@ -1,6 +1,11 @@
 # Apple Notes to Notesnook Exporter
 
-Export your Apple Notes to Notesnook markdown format. Extracts notes from the local Apple Notes database with proper protobuf parsing, preserving titles, content, folders, dates, and inline attachments.
+Export your Apple Notes to a markdown format compatible with [Notesnook](https://notesnook.com/). Extracts notes from the local Apple Notes database with proper protobuf parsing, preserving titles, content, folders, dates, and inline attachments.
+
+As of 11/2025, when I tried selecting all notes from Apple Notes to export to markdown, it corrupts the data and leaves out helpful data such as timestamps.
+
+Motivation: I would like a cross-platform solution for my notes. At the time of writing this, getting data into Google Keep has proven to be awkward, and getting data out of Apple Notes has also proven to be awkward.
+This tool is to help me export my Apple Notes to Notesnook, which seems like a nice cross-platform notes alternative.
 
 ## Features
 
@@ -17,6 +22,7 @@ Export your Apple Notes to Notesnook markdown format. Extracts notes from the lo
 
 - macOS (for Apple Notes access)
 - Python 3.9 or higher
+- [Homebrew](https://brew.sh/)
 - Protocol Buffers compiler (`protoc`) - Install with `brew install protobuf`
 
 ## Installation
