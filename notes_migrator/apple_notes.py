@@ -81,26 +81,8 @@ class AppleNotesExtractor:
             for row in rows:
                 pk, title, snippet, created, modified, folder, content_data = row
 
-                # Extract text content from binary data
-                content = self._extract_content(content_data, snippet)
-
-                # Extract attachments
-                attachments = []
-                if content_data:
-                    try:
-                        # Check if it's gzipped
-                        is_gzipped = len(content_data) >= 2 and content_data[0] == 0x1f and content_data[1] == 0x8b
-                        decompressed = gzip.decompress(content_data) if is_gzipped else content_data
-
-                        # Parse protobuf to get attribute_run
-                        from . import notestore_pb2
-                        note_store = notestore_pb2.NoteStoreProto()
-                        note_store.ParseFromString(decompressed)
-
-                        if note_store.HasField('document') and note_store.document.HasField('note'):
-                            attachments = self._extract_attachments(pk, note_store.document.note.attribute_run)
-                    except:
-                        pass  # If attachment extraction fails, continue without attachments
+                # Extract text content and attachments together
+                content, attachments = self._extract_content_and_attachments(pk, content_data, snippet)
 
                 # Convert Apple's time format (seconds since 2001-01-01)
                 created_date = self._convert_apple_timestamp(created)
@@ -123,18 +105,19 @@ class AppleNotesExtractor:
 
         return notes
 
-    def _extract_content(self, content_data: Optional[bytes], snippet: Optional[str]) -> str:
-        """Extract readable text from note content data.
+    def _extract_content_and_attachments(self, note_pk: int, content_data: Optional[bytes], snippet: Optional[str]) -> tuple[str, List[Dict[str, Any]]]:
+        """Extract readable text and file attachments from note content data.
 
         Args:
+            note_pk: Primary key of the note.
             content_data: Binary content data from database.
             snippet: Text snippet as fallback.
 
         Returns:
-            Extracted text content.
+            Tuple of (text_content, attachments_list).
         """
         if not content_data:
-            return snippet or ""
+            return snippet or "", []
 
         try:
             # Check if it's gzipped (magic bytes 0x1f 0x8b)
@@ -147,30 +130,45 @@ class AppleNotesExtractor:
                 # Legacy iOS 8 format - plain text
                 decompressed = content_data
 
-            # Try to parse as protobuf using protobuf-inspector
-            text = self._parse_protobuf_content(decompressed)
+            # Try to parse as protobuf
+            text, attachments = self._parse_protobuf_with_attachments(note_pk, decompressed)
 
             # If parsing fails or result is too short, fall back to snippet
             if not text or len(text.strip()) < 3:
-                return snippet or ""
+                return snippet or "", []
 
-            return text.strip()
+            return text.strip(), attachments
 
         except Exception as e:
             # If decompression or parsing fails, fall back to snippet
-            return snippet or ""
+            return snippet or "", []
 
-    def _parse_protobuf_content(self, data: bytes) -> str:
-        """Parse protobuf data to extract clean note text.
+    def _extract_content(self, content_data: Optional[bytes], snippet: Optional[str]) -> str:
+        """Extract readable text from note content data.
+
+        Args:
+            content_data: Binary content data from database.
+            snippet: Text snippet as fallback.
+
+        Returns:
+            Extracted text content.
+        """
+        # This is now a wrapper for backward compatibility
+        content, _ = self._extract_content_and_attachments(0, content_data, snippet)
+        return content
+
+    def _parse_protobuf_with_attachments(self, note_pk: int, data: bytes) -> tuple[str, List[Dict[str, Any]]]:
+        """Parse protobuf data to extract clean note text and file attachments.
 
         Apple Notes uses a protobuf structure:
         NoteStoreProto > Document > Note > note_text
 
         Args:
+            note_pk: Primary key of the note.
             data: Decompressed protobuf binary data.
 
         Returns:
-            Extracted clean text.
+            Tuple of (extracted_text, attachments_list).
         """
         try:
             # Import the generated protobuf classes
@@ -189,19 +187,39 @@ class AppleNotesExtractor:
                     # This is the complete, clean note text
                     note_text = note.note_text
 
-                    # Replace attachment markers with actual content
-                    note_text = self._resolve_attachments(note_text, note.attribute_run)
+                    # Replace inline attachment markers and get positions for file attachments
+                    # Returns (resolved_text, attachment_id_to_position_map)
+                    note_text, attachment_positions = self._resolve_attachments(note_text, note.attribute_run)
 
-                    return note_text.strip()
+                    # Extract file attachments using the position map
+                    attachments = self._extract_attachments_with_positions(note_pk, note.attribute_run, attachment_positions)
+
+                    return note_text.strip(), attachments
 
             # If we couldn't find the text field, fall back
-            return self._extract_text_strings(data)
+            return self._extract_text_strings(data), []
 
         except Exception as e:
             # If protobuf parsing fails, fall back to string extraction
-            return self._extract_text_strings(data)
+            return self._extract_text_strings(data), []
 
-    def _resolve_attachments(self, text: str, attribute_runs) -> str:
+    def _parse_protobuf_content(self, data: bytes) -> str:
+        """Parse protobuf data to extract clean note text.
+
+        Apple Notes uses a protobuf structure:
+        NoteStoreProto > Document > Note > note_text
+
+        Args:
+            data: Decompressed protobuf binary data.
+
+        Returns:
+            Extracted clean text.
+        """
+        # This is now a wrapper for backward compatibility
+        text, _ = self._parse_protobuf_with_attachments(0, data)
+        return text
+
+    def _resolve_attachments(self, text: str, attribute_runs) -> tuple[str, dict]:
         """Replace \ufffc markers with actual attachment content.
 
         Args:
@@ -209,10 +227,11 @@ class AppleNotesExtractor:
             attribute_runs: List of AttributeRun messages from protobuf.
 
         Returns:
-            Text with attachments resolved.
+            Tuple of (resolved_text, attachment_positions) where attachment_positions
+            maps attachment_id to position in resolved text for file attachments.
         """
         try:
-            # Build a list of (position, replacement) tuples
+            # Build a list of (position, replacement, attachment_id, type_uti) tuples
             replacements = []
             pos = 0
 
@@ -230,22 +249,38 @@ class AppleNotesExtractor:
                         # Query database for attachment content
                         attachment_text = self._get_attachment_text(attachment_id, type_uti)
                         if attachment_text:
-                            # Record this replacement
+                            # Record this replacement (for inline attachments like hashtags)
                             marker_pos = pos + text_segment.index('\ufffc')
-                            replacements.append((marker_pos, attachment_text))
+                            replacements.append((marker_pos, attachment_text, attachment_id, type_uti))
+                        else:
+                            # For file attachments, record position but don't replace yet
+                            marker_pos = pos + text_segment.index('\ufffc')
+                            replacements.append((marker_pos, None, attachment_id, type_uti))
 
                 pos += attr_run.length
 
-            # Apply replacements in reverse order to maintain positions
+            # Apply replacements and track position changes
+            attachment_positions = {}
             result = list(text)
-            for marker_pos, replacement in reversed(replacements):
-                result[marker_pos] = replacement
+            offset = 0  # Track cumulative position shift
 
-            return ''.join(result)
+            for marker_pos, replacement, attachment_id, type_uti in sorted(replacements, key=lambda x: x[0]):
+                adjusted_pos = marker_pos + offset
+
+                if replacement is not None:
+                    # Inline attachment (hashtag, mention) - replace the marker
+                    result[adjusted_pos] = replacement
+                    # Update offset (replacement length - 1 for the marker we're replacing)
+                    offset += len(replacement) - 1
+                else:
+                    # File attachment - record position in resolved text
+                    attachment_positions[attachment_id] = adjusted_pos
+
+            return ''.join(result), attachment_positions
 
         except Exception:
-            # If attachment resolution fails, return original text
-            return text
+            # If attachment resolution fails, return original text with empty positions
+            return text, {}
 
     def _get_attachment_text(self, attachment_id: str, type_uti: str) -> Optional[str]:
         """Get text content for an inline attachment.
@@ -286,6 +321,82 @@ class AppleNotesExtractor:
 
         except Exception:
             return None
+
+    def _extract_attachments_with_positions(self, note_pk: int, attribute_runs, attachment_positions: dict) -> List[Dict[str, Any]]:
+        """Extract file attachments using pre-calculated positions from resolved text.
+
+        Args:
+            note_pk: Primary key of the note in ZICCLOUDSYNCINGOBJECT.
+            attribute_runs: List of AttributeRun from protobuf.
+            attachment_positions: Map of attachment_id to position in resolved text.
+
+        Returns:
+            List of attachment dictionaries with file data.
+        """
+        attachments = []
+
+        try:
+            for attr_run in attribute_runs:
+                if attr_run.HasField('attachment_info'):
+                    attachment_id = attr_run.attachment_info.attachment_identifier
+                    type_uti = attr_run.attachment_info.type_uti
+
+                    # Skip inline attachments (hashtags, mentions) - already handled
+                    if 'hashtag' in type_uti or 'mention' in type_uti:
+                        continue
+
+                    # Only process if we have a position for this attachment
+                    if attachment_id not in attachment_positions:
+                        continue
+
+                    # Get attachment metadata from database
+                    cursor = self.conn.cursor()
+
+                    # Query for file attachment metadata and media UUID
+                    # The ZMEDIA field points to another record in the same table
+                    # that contains the actual media file UUID
+                    cursor.execute("""
+                        SELECT
+                            att.ZIDENTIFIER as att_uuid,
+                            att.ZTYPEUTI as att_uti,
+                            att.ZFILENAME,
+                            att.ZFILESIZE,
+                            media.ZIDENTIFIER as media_uuid
+                        FROM ZICCLOUDSYNCINGOBJECT att
+                        LEFT JOIN ZICCLOUDSYNCINGOBJECT media ON att.ZMEDIA = media.Z_PK
+                        WHERE att.ZIDENTIFIER = ?
+                    """, (attachment_id,))
+
+                    row = cursor.fetchone()
+                    if row:
+                        att_uuid, uti, filename, filesize, media_uuid = row
+
+                        # Read media file from filesystem using the media UUID
+                        media_result = self._read_media_file(media_uuid) if media_uuid else None
+
+                        if media_result:
+                            media_data, discovered_filename = media_result
+
+                            # Determine filename (prefer database filename, then discovered, then generated)
+                            final_filename = filename or discovered_filename
+                            if not final_filename:
+                                # Generate filename from UTI if no filename available
+                                ext = self._get_extension_from_uti(uti or type_uti)
+                                final_filename = f"{att_uuid[:8]}{ext}"
+
+                            attachments.append({
+                                'uuid': att_uuid,
+                                'type_uti': uti or type_uti,
+                                'filename': final_filename,
+                                'data': media_data,
+                                'position': attachment_positions[attachment_id]  # Use position from resolved text!
+                            })
+
+        except Exception as e:
+            # If attachment extraction fails, continue without attachments
+            pass
+
+        return attachments
 
     def _extract_attachments(self, note_pk: int, attribute_runs) -> List[Dict[str, Any]]:
         """Extract file attachments for a note.
