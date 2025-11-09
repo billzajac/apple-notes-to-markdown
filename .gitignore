@@ -36,6 +36,7 @@ ENV/
 
 # Project specific
 my-notes/
+my-notes.zip
 *.db
 *.sqlite
 credentials.json
