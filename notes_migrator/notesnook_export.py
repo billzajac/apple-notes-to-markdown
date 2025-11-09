@@ -101,15 +101,14 @@ class NotesnookExporter:
         Returns:
             Text with markdown image/link syntax.
         """
-        from urllib.parse import quote
-
         result = []
         for i, char in enumerate(text):
             if char == '\ufffc' and i in position_to_file:
                 file_path = position_to_file[i]
-                # URL-encode the path to handle spaces and special characters
-                # quote() with safe='/' keeps directory separators but encodes spaces, etc.
-                encoded_path = quote(file_path, safe='/')
+
+                # Smart encode: only encode characters that break URI decoding
+                # Keep most characters (including spaces) unencoded for better compatibility
+                encoded_path = self._smart_encode_path(file_path)
 
                 # Determine if it's an image based on extension
                 ext = Path(file_path).suffix.lower()
@@ -123,6 +122,35 @@ class NotesnookExporter:
                 result.append(char)
 
         return ''.join(result)
+
+    def _smart_encode_path(self, path: str) -> str:
+        """Encode path for use with JavaScript's decodeURIComponent().
+
+        Notesnook's importer calls decodeURIComponent() on paths. We use
+        urllib.parse.quote() with a safe set of characters that won't break
+        decodeURIComponent() but keeps the path readable.
+
+        Safe characters (won't be encoded):
+        - Unreserved: A-Z a-z 0-9 - _ . ~
+        - Path separator: /
+        - Space (works fine with decodeURIComponent)
+        - Common punctuation: ( ) ' ,
+
+        Args:
+            path: File path to encode.
+
+        Returns:
+            Percent-encoded path safe for decodeURIComponent().
+        """
+        from urllib.parse import quote
+
+        # Use quote() with safe characters that work with decodeURIComponent
+        # Default safe chars are: /
+        # Add: - _ . ~ (unreserved per RFC 3986)
+        # Add: space, (), ', , (these work fine with decodeURIComponent)
+        #
+        # This will encode: + & # % and other special characters
+        return quote(path, safe='/-_.~ ()\',')
 
     def _write_markdown(self, note: AppleNote, path: Path, attachments_dir: str) -> None:
         """Write note as markdown file with YAML frontmatter.
@@ -145,6 +173,10 @@ class NotesnookExporter:
         if note.modified_date:
             updated_iso = self._format_datetime_iso(note.modified_date)
             frontmatter.append(f"updated: {updated_iso}")
+
+        # Add pinned status
+        if note.pinned:
+            frontmatter.append(f"pinned: true")
 
         # Add folder as tag if present
         if note.folder:
@@ -288,8 +320,10 @@ class NotesnookExporter:
         Returns:
             Sanitized filename.
         """
-        # Replace invalid characters
-        invalid_chars = '<>:"/\\|?*'
+        # Replace invalid filesystem characters and URI-problematic characters
+        # Filesystem: < > : " / \ | ? *
+        # URI-problematic: # % (causes issues with decodeURIComponent in Notesnook)
+        invalid_chars = '<>:"/\\|?*#%'
         for char in invalid_chars:
             filename = filename.replace(char, '_')
 

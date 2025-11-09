@@ -205,12 +205,13 @@ Examples:
         zip_path = args.output_dir.parent / f"{args.output_dir.name}"
 
         try:
-            # Create the zip file (without .zip extension, shutil.make_archive adds it)
+            # Create the zip file with files at root (not in a subfolder)
+            # This puts .md files and attachments/ at the root of the ZIP
             zip_file = shutil.make_archive(
                 str(zip_path),
                 'zip',
-                args.output_dir.parent,
-                args.output_dir.name
+                args.output_dir,
+                '.'
             )
             print(f"  ✅ Created: {zip_file}")
 
@@ -240,6 +241,9 @@ Examples:
         print(f"\nℹ️  Exported with YAML frontmatter including:")
         print(f"   • Title, created/updated dates, and tags")
         print(f"   • Images and PDFs embedded with markdown syntax")
+        if attachment_count > 0:
+            print(f"\n⚠️  Note: Notesnook requires a Pro account to import attachments")
+            print(f"   Without Pro, images/PDFs will be skipped during import")
         print(f"{'=' * 60}")
 
         return 0

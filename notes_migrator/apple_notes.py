@@ -20,6 +20,7 @@ class AppleNote:
     created_date: Optional[datetime]
     modified_date: Optional[datetime]
     folder: Optional[str]
+    pinned: bool = False
     attachments: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -66,7 +67,8 @@ class AppleNotesExtractor:
                     n.ZCREATIONDATE1 as created,
                     n.ZMODIFICATIONDATE1 as modified,
                     f.ZTITLE2 as folder,
-                    c.ZDATA as content_data
+                    c.ZDATA as content_data,
+                    n.ZISPINNED as is_pinned
                 FROM ZICCLOUDSYNCINGOBJECT n
                 LEFT JOIN ZICCLOUDSYNCINGOBJECT f ON n.ZFOLDER = f.Z_PK
                 LEFT JOIN ZICNOTEDATA c ON n.ZNOTEDATA = c.Z_PK
@@ -79,7 +81,7 @@ class AppleNotesExtractor:
             rows = cursor.fetchall()
 
             for row in rows:
-                pk, title, snippet, created, modified, folder, content_data = row
+                pk, title, snippet, created, modified, folder, content_data, is_pinned = row
 
                 # Extract text content and attachments together
                 content, attachments = self._extract_content_and_attachments(pk, content_data, snippet)
@@ -116,6 +118,7 @@ class AppleNotesExtractor:
                     created_date=created_date,
                     modified_date=modified_date,
                     folder=folder,
+                    pinned=bool(is_pinned) if is_pinned else False,
                     attachments=attachments
                 )
                 notes.append(note)
