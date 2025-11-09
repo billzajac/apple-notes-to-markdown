@@ -1,27 +1,30 @@
-# Apple Notes to Google Keep Migrator
+# Apple Notes to Notesnook Exporter
 
-Migrate your Apple Notes to Google Keep with this Python tool. Extracts notes from the local Apple Notes database and uploads them to Google Keep while preserving titles, content, folders (as labels), and timestamps.
+Export your Apple Notes to Notesnook markdown format. Extracts notes from the local Apple Notes database with proper protobuf parsing, preserving titles, content, folders, dates, and inline attachments.
 
 ## Features
 
 - 📱 Extracts notes directly from Apple Notes SQLite database
-- 📤 Uploads to Google Keep via unofficial API
-- 🏷️ Converts Apple Notes folders to Google Keep labels
-- 📅 Preserves creation and modification dates
-- 🔍 Dry-run mode to preview before migrating
+- 📝 Exports to Notesnook markdown format with YAML frontmatter
+- 🔬 Proper protobuf parsing using Apple Notes schema
+- 🏷️ Converts Apple Notes folders to tags
+- 📅 Preserves creation and modification dates (ISO 8601)
+- 🔗 Resolves inline attachments (hashtags, mentions)
+- 🔍 Dry-run mode to preview before exporting
 - ✨ Simple CLI interface
 
 ## Requirements
 
 - macOS (for Apple Notes access)
 - Python 3.9 or higher
-- Google account
+- Protocol Buffers compiler (`protoc`) - Install with `brew install protobuf`
 
 ## Installation
 
 1. Clone this repository:
 ```bash
-cd /Users/billyz/code/apple-notes-to-google-keep
+git clone <repository-url>
+cd apple-notes-to-notesnook
 ```
 
 2. Create a virtual environment:
@@ -30,57 +33,60 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Install the package:
+3. Install the package:
 ```bash
 pip install -e .
 ```
 
-## Google Account Setup
-
-**Important:** If you have 2-factor authentication enabled (recommended), you'll need to create an app-specific password:
-
-1. Go to https://myaccount.google.com/apppasswords
-2. Select "Mail" and "Mac" (or "Other")
-3. Generate password
-4. Use this password instead of your regular password
+The protobuf schema has already been compiled. If you need to recompile:
+```bash
+protoc --python_out=notes_migrator/ --proto_path=notes_migrator/ notestore.proto
+```
 
 ## Usage
 
-### Basic migration (recommended to try dry-run first):
+### Basic Export
 
 ```bash
-# Preview what will be migrated without actually doing it
-notes-migrate --dry-run
+# Activate virtual environment
+source venv/bin/activate
 
-# Migrate all notes
-notes-migrate
+# Export all notes to Notesnook markdown format
+notes-export
+
+# Export to custom directory
+notes-export --output-dir ./my-notes
+
+# Preview what will be exported (dry run)
+notes-export --dry-run
 ```
 
-### Advanced options:
+### After Export
+
+1. Place your attachment files in the `attachments/` subdirectory within the export folder
+2. Open Notesnook app
+3. Go to Settings > Notesnook Importer
+4. Select "Markdown" as the source
+5. Select your export folder
+6. Review and confirm the import
+
+### Advanced Options
 
 ```bash
 # Use custom Apple Notes database path
-notes-migrate --db-path /path/to/NoteStore.sqlite
-
-# Use custom label for migrated notes
-notes-migrate --label "Imported from Mac"
+notes-export --db-path /path/to/NoteStore.sqlite
 
 # Limit number of notes (for testing)
-notes-migrate --max-notes 5
+notes-export --max-notes 10
 
-# Provide username upfront
-notes-migrate --username your-email@gmail.com
+# Custom attachments directory name
+notes-export --attachments-dir my-attachments
 ```
 
-### Get help:
+### Get Help
 
 ```bash
-notes-migrate --help
+notes-export --help
 ```
 
 ## How It Works
@@ -90,20 +96,46 @@ notes-migrate --help
    ~/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite
    ```
 
-2. **Transform**: Converts Apple Notes data structure to Google Keep format:
-   - Title → Note title
-   - Content → Note content
-   - Folder → Label
-   - Timestamps → Creation/modification dates
+2. **Parse**: Uses proper protobuf parsing with Apple Notes schema:
+   - Decompresses gzipped data (magic bytes: 0x1f 0x8b)
+   - Parses `NoteStoreProto.document.note.note_text` field
+   - Resolves inline attachments (hashtags, mentions) from database
+   - Extracts clean text without junk/metadata
 
-3. **Load**: Uploads notes to Google Keep using the `gkeepapi` library
+3. **Transform**: Converts to Notesnook markdown format:
+   - Title → YAML frontmatter `title` field
+   - Content → Markdown body (with inline attachments resolved)
+   - Folder → YAML frontmatter `tags` field
+   - Created date → YAML frontmatter `created` field (ISO 8601)
+   - Modified date → YAML frontmatter `updated` field (ISO 8601)
+
+4. **Export**: Writes markdown files compatible with Notesnook importer
+
+## Notesnook Markdown Format
+
+Each note is exported as a `.md` file with YAML frontmatter:
+
+```markdown
+---
+title: Your Note Title
+created: 2024-01-15T10:30:00.000Z
+updated: 2024-01-20T15:45:00.000Z
+tags: Work
+---
+
+Your note content here.
+
+Inline attachments are resolved: #hashtag @mention
+
+Images and attachments: ![description](attachments/image.jpg)
+```
 
 ## Limitations
 
-- **Text only**: Attachments, images, sketches, and complex formatting are not supported
-- **Unofficial API**: Uses unofficial Google Keep API which may break with Google updates
-- **Rate limiting**: Large migrations may be slow to avoid API rate limits
+- **File attachments**: Images, PDFs, and other file attachments need to be manually placed in the `attachments/` directory
+- **Complex formatting**: Tables, drawings, and sketches are not exported (limitations of markdown)
 - **macOS only**: Requires access to local Apple Notes database
+- **Inline attachments**: Hashtags and mentions are resolved; other inline objects show as `[attachment]`
 
 ## Troubleshooting
 
@@ -112,26 +144,22 @@ notes-migrate --help
 - Check that Apple Notes app has been opened at least once
 - Verify Notes are stored locally (not just in iCloud)
 
-### "Failed to login to Google Keep"
-- Use app-specific password if you have 2FA enabled
-- Check your username/email is correct
-- Ensure you have access to Google Keep (some workspace accounts restrict it)
-
 ### "Permission denied" on database
-- Close Apple Notes app before running the migration
+- Close Apple Notes app before running the export
 - The tool opens the database in read-only mode, but macOS may still lock it
 
-### Notes appear empty or garbled
-- Apple Notes content extraction is complex; some formatting may be lost
-- Check the original note in Apple Notes to verify content exists
-- Try exporting a test note first with `--max-notes 1`
+### Notes appear incomplete
+- This should not happen with the proper protobuf parser
+- If you see `[attachment]` markers, those are embedded objects not yet supported
+- Check the original note in Apple Notes to verify
+- Report issues with the protobuf schema
 
 ## Security & Privacy
 
-- Your Google credentials are only used to authenticate with Google Keep
-- No credentials are stored (except optionally in system keyring via gkeepapi)
 - All processing happens locally on your machine
+- No data is sent to external servers
 - The tool reads from Apple Notes database in read-only mode
+- Exported files are saved to your local filesystem
 
 ## Contributing
 
@@ -141,11 +169,44 @@ This is a personal project, but contributions are welcome! Please open an issue 
 
 MIT License - see LICENSE file for details
 
+## Technical Details
+
+This exporter uses:
+- **Apple Notes protobuf schema** - Reverse-engineered schema from [apple-notes-liberator](https://github.com/HamburgChimps/apple-notes-liberator)
+- **Forensics research** - Based on [Ciofeca Forensics](https://www.ciofecaforensics.com/categories/#Apple%20Notes) Apple Notes analysis
+- **Proper protobuf parsing** - Uses compiled Python protobuf classes, not string extraction
+- **Database schema knowledge** - Compatible with iOS 9-18+
+
+## References and Inspiration
+
+This project was made possible by extensive research and open-source contributions:
+
+### Apple Notes Format Research
+- [iOS 18 Notes Analysis](https://www.ciofecaforensics.com/2024/12/10/ios18-notes/) - Ciofeca Forensics' latest analysis of Apple Notes structure and iOS 18 changes
+- [Apple Notes Protobuf Schema](https://github.com/HamburgChimps/apple-notes-liberator/blob/main/src/main/proto/notestore.proto) - Reverse-engineered protobuf definition
+- [apple-notes-liberator](https://github.com/HamburgChimps/apple-notes-liberator) - Ruby-based Apple Notes parser and liberator
+- [apple_cloud_notes_parser](https://github.com/threeplanetssoftware/apple_cloud_notes_parser) - Comprehensive Ruby implementation for forensics
+
+### Notesnook Integration
+- [Notesnook Markdown Import Documentation](https://help.notesnook.com/importing-notes/import-notes-from-markdown-files#supported-formats) - Official supported formats and import guide
+- [Notesnook](https://github.com/streetwriters/notesnook) - Privacy-focused note-taking app
+
+### Migration Guides
+- [Migrating from Apple Notes to Google Keep](https://www.mandclu.com/blog/migrating-apple-notes-google-keep) - Background on note migration challenges
+
 ## Acknowledgments
 
-- [gkeepapi](https://github.com/kiwiz/gkeepapi) - Unofficial Google Keep API client
-- Inspired by [NotesMigrator](https://github.com/mgks/NotesMigrator)
+Special thanks to:
+- **Ciofeca Forensics** for detailed Apple Notes forensics research
+- **HamburgChimps** for reverse-engineering the protobuf schema
+- **Notesnook team** for building an excellent privacy-focused notes app
+- **threeplanetssoftware** for the foundational Ruby parser implementation
 
-## Disclaimer
+## Why Notesnook?
 
-This tool uses an unofficial Google Keep API. Use at your own risk. Always backup your notes before migration.
+Notesnook is an open-source, privacy-focused note-taking app with:
+- End-to-end encryption
+- Cross-platform support (Windows, Mac, Linux, iOS, Android, Web)
+- Rich markdown support with YAML frontmatter
+- No vendor lock-in (notes in standard markdown format)
+- Active development and community

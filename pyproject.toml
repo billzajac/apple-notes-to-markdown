@@ -1,16 +1,15 @@
 [project]
-name = "apple-notes-to-google-keep"
+name = "apple-notes-to-notesnook"
 version = "0.1.0"
-description = "Migrate Apple Notes to Google Keep"
+description = "Export Apple Notes to Notesnook markdown format"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "gkeepapi>=0.16.0",
-    "keyring>=24.0.0",
+    "protobuf>=4.21.0",
 ]
 
 [project.scripts]
-notes-migrate = "notes_migrator.cli:main"
+notes-export = "notes_migrator.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
