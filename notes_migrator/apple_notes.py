@@ -84,6 +84,14 @@ class AppleNotesExtractor:
                 # Extract text content and attachments together
                 content, attachments = self._extract_content_and_attachments(pk, content_data, snippet)
 
+                # Remove title from beginning of content if present
+                # Apple Notes includes the title as the first line
+                if content and title:
+                    # Check if content starts with the title (possibly followed by newline)
+                    if content.startswith(title):
+                        # Remove title and any following newlines
+                        content = content[len(title):].lstrip('\n')
+
                 # Convert Apple's time format (seconds since 2001-01-01)
                 created_date = self._convert_apple_timestamp(created)
                 modified_date = self._convert_apple_timestamp(modified)

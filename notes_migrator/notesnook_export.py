@@ -262,9 +262,15 @@ class NotesnookExporter:
         # Strip trailing whitespace and ensure single newline at end
         content = content.strip()
 
-        # Clean up multiple consecutive blank lines
+        # Fix single line breaks for proper markdown rendering
+        # In markdown, single newlines don't create line breaks
+        # Convert single newlines to double newlines for proper rendering
+        # This preserves the original line structure from Apple Notes
         import re
-        content = re.sub(r'\n\n\n+', '\n\n', content)
+        content = re.sub(r'(?<!\n)\n(?!\n)', '\n\n', content)
+
+        # Clean up excessive consecutive blank lines (4+ newlines -> 2 newlines)
+        content = re.sub(r'\n\n\n\n+', '\n\n', content)
 
         # Remove trailing non-alphanumeric characters that are likely artifacts
         # from Apple Notes truncation (but preserve intentional punctuation)
